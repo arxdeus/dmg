@@ -33,12 +33,6 @@ Future<int> execute(List<String> args) async {
         'license-path',
         help: 'Path of the license file',
       )
-      ..addOption(
-        'notary-profile',
-        defaultsTo: 'NotaryProfile',
-        help:
-            'Name of the notary profile that created by `xcrun notarytool store-credentials`',
-      )
       ..addFlag(
         'build',
         help:
@@ -99,7 +93,7 @@ Future<int> execute(List<String> args) async {
     final settings = param['settings'] as String?;
     final licensePath = param['license-path'] as String?;
     var signCertificate = param['sign-certificate'] as String?;
-    var notaryProfile = param['notary-profile'] as String;
+
     final runBuild = param['build'] as bool;
     final cleanBuild = param['clean-build'] as bool;
     final runSign = param['sign'] as bool;
@@ -220,7 +214,17 @@ Future<int> execute(List<String> args) async {
 
     if (runSign && runNotarization) {
       log.info('Notarizing...');
-      final notaryOutput = runNotaryTool(dmg, notaryProfile, isVerbose);
+      log.info('Please provide your Apple notarization credentials:');
+
+      final NotaryCredentials credentials;
+      try {
+        credentials = promptNotaryCredentials();
+      } catch (e) {
+        log.warning('$e');
+        return 1;
+      }
+
+      final notaryOutput = runNotaryTool(dmg, credentials, isVerbose);
       if (notaryOutput == null) {
         log.warning('Failed to submit for notarization');
         return 1;
@@ -251,10 +255,8 @@ Future<int> execute(List<String> args) async {
       final logFile = File(notaryLogPath);
 
       final success = await waitAndCheckNotaryState(
-        notaryOutput,
-        dmg,
-        notaryProfile,
         notaryId,
+        credentials,
         logFile,
         isVerbose,
       );

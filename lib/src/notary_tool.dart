@@ -3,22 +3,63 @@ import 'dart:io';
 
 import 'package:dmg/src/utils.dart';
 
+/// Credentials for Apple notarization
+class NotaryCredentials {
+  final String appleId;
+  final String password;
+  final String teamId;
+
+  NotaryCredentials({
+    required this.appleId,
+    required this.password,
+    required this.teamId,
+  });
+}
+
+/// Prompt user for notarization credentials via stdin
+NotaryCredentials promptNotaryCredentials() {
+  stdout.write('Enter Apple ID: ');
+  final appleId = stdin.readLineSync()?.trim() ?? '';
+
+  stdout.write('Enter App-Specific Password: ');
+  final password = stdin.readLineSync()?.trim() ?? '';
+
+  stdout.write('Enter Team ID: ');
+  final teamId = stdin.readLineSync()?.trim() ?? '';
+
+  if (appleId.isEmpty || password.isEmpty || teamId.isEmpty) {
+    throw Exception(
+        'All notary credentials (Apple ID, Password, Team ID) are required.');
+  }
+
+  return NotaryCredentials(
+    appleId: appleId,
+    password: password,
+    teamId: teamId,
+  );
+}
+
 /// Submit DMG for notarization with error handling
-String? runNotaryTool(String dmg, String notaryProfile, bool isVerbose) {
+String? runNotaryTool(
+    String dmg, NotaryCredentials credentials, bool isVerbose) {
   try {
     if (!File(dmg).existsSync()) {
       log.warning('DMG file does not exist: $dmg');
       return null;
     }
 
-    log.info('Using notary profile: $notaryProfile');
+    log.info('Submitting for notarization...');
 
     final result = Process.runSync('xcrun', [
       'notarytool',
       'submit',
       dmg,
-      '--keychain-profile',
-      notaryProfile,
+      '--apple-id',
+      credentials.appleId,
+      '--password',
+      credentials.password,
+      '--team-id',
+      credentials.teamId,
     ]);
 
     if (result.exitCode != 0) {
@@ -41,26 +82,32 @@ String? runNotaryTool(String dmg, String notaryProfile, bool isVerbose) {
   }
 }
 
-/// Waits for and checks notary state
+/// Waits for and checks notary state using `xcrun notarytool log` (JSON)
 Future<bool> waitAndCheckNotaryState(
-  String notaryOutput,
-  String dmg,
-  String notaryProfile,
   String notaryId,
+  NotaryCredentials credentials,
   File logFile,
   bool isVerbose,
 ) async {
-  bool success = false;
   do {
     await Future.delayed(const Duration(seconds: 30));
 
     log.info('Checking for the notary result...');
+
+    if (logFile.existsSync()) {
+      logFile.deleteSync();
+    }
+
     Process.runSync('xcrun', [
       'notarytool',
       'log',
       notaryId,
-      '--keychain-profile',
-      notaryProfile,
+      '--apple-id',
+      credentials.appleId,
+      '--password',
+      credentials.password,
+      '--team-id',
+      credentials.teamId,
       logFile.path,
     ]);
 
@@ -77,15 +124,12 @@ Future<bool> waitAndCheckNotaryState(
 
     final decoded = jsonDecode(json);
     if (decoded['status'] == 'Accepted') {
-      success = true;
       log.info('Notarized');
+      return true;
     } else {
       log.warning('Notarize error with message: ${decoded['statusSummary']}');
       log.warning('Look at ${logFile.path} for more details');
+      return false;
     }
-
-    break;
   } while (true);
-
-  return success;
 }
